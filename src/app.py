@@ -1,179 +1,413 @@
-"""
-🚀 CORE AGENT APP (Dành cho Role 4: Core Developer / Integrator)
-Đề tài 9: Trợ Lý Sàng Lọc Hồ Sơ Tuyển Dụng & Hẹn Phỏng Vấn.
+"""RecruitMate: fair baseline versus ReAct agent comparison."""
 
-File chính ghép nối tất cả các thành phần của nhóm:
-    - config/test_cases.json (Role 1)
-    - src/tools.py           (Role 2)
-    - src/prompts.py         (Role 3)
-    - src/providers.py       (Multi-Provider LLM Adapter)
-"""
+from __future__ import annotations
 
 import json
 import os
-import sys
 import re
+import sys
+from typing import Any
+
 from dotenv import load_dotenv
 
-# Đảm bảo import các module cùng thư mục src/ hoạt động mượt mà
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Đảm bảo in ra Tiếng Việt và Emojis không bị lỗi trên Windows Console
-if sys.stdout.encoding != 'utf-8':
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+
+if sys.stdout.encoding != "utf-8":
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
-# Import các thành phần từ file của Role 2, Role 3 & Multi-Provider Adapter
-from tools import TOOL_SPECS, TOOL_REGISTRY, AVAILABLE_TOOLS, execute_tool
-from prompts import CHATBOT_BASELINE_PROMPT, REACT_SYSTEM_PROMPT, MAX_ITERATIONS
-from providers import get_llm_provider
+
+try:
+    from .prompts import (
+        CHATBOT_BASELINE_PROMPT,
+        MAX_ITERATIONS,
+        MAX_TOOL_CALLS,
+        REACT_SYSTEM_PROMPT,
+    )
+    from .providers import (
+        BaseLLMProvider,
+        ProviderError,
+        get_llm_provider,
+    )
+    from .tools import (
+        TOOL_REGISTRY,
+        TOOL_SPECS,
+        execute_tool,
+        reset_mock_state,
+    )
+except ImportError:
+    # Cho phép chạy trực tiếp: python src/app.py
+    from prompts import (
+        CHATBOT_BASELINE_PROMPT,
+        MAX_ITERATIONS,
+        MAX_TOOL_CALLS,
+        REACT_SYSTEM_PROMPT,
+    )
+    from providers import (
+        BaseLLMProvider,
+        ProviderError,
+        get_llm_provider,
+    )
+    from tools import (
+        TOOL_REGISTRY,
+        TOOL_SPECS,
+        execute_tool,
+        reset_mock_state,
+    )
+
 
 load_dotenv()
-
-LINE = "=" * 70
-
-
-def load_test_cases():
-    """Đọc bộ test cases từ config/test_cases.json của Role 1."""
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    config_path = os.path.join(base_dir, "config", "test_cases.json")
-
-    # Fallback kiểm tra nếu file ở thư mục hiện tại
-    if not os.path.exists(config_path):
-        config_path = "test_cases.json"
-
-    with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+LINE = "=" * 78
 
 
-def parse_action(text: str):
-    """Trích xuất tên tool và tham số từ dạng Action: tool_name[arg1, arg2]"""
-    match = re.search(r"Action:\s*(\w+)\[(.*?)\]", text, re.IGNORECASE)
-    if not match:
-        return None, []
-    tool_name = match.group(1).strip()
-    raw_args = match.group(2).strip()
-    if not raw_args:
-        args = []
-    else:
-        args = [a.strip(" '\"") for a in raw_args.split(",")]
-    return tool_name, args
+class ActionParseError(ValueError):
+    """The model did not follow the Action protocol."""
 
 
-# ============================================================================
-# MỐC 2: BASELINE CHATBOT (Chatbot gốc - KHÔNG có công cụ)
-# ============================================================================
+def load_test_cases() -> list[dict[str, Any]]:
+    path = os.path.join(PROJECT_ROOT, "config", "test_cases.json")
+    with open(path, "r", encoding="utf-8") as file:
+        return json.load(file)
 
-def run_baseline_chatbot(user_query: str, provider) -> str:
-    """
-    Chạy Chatbot gốc (Baseline): chỉ có LLM + System Prompt, KHÔNG được gọi Tool.
-    """
-    print(f"\n💬 [CHATBOT BASELINE] Câu hỏi: {user_query}")
-    print("🚫 Công cụ khả dụng: KHÔNG CÓ (baseline chỉ dùng kiến thức sẵn có của LLM)")
 
+def parse_action(text: str) -> tuple[str, dict[str, Any]]:
+    """Parse ``Action`` and JSON ``Action Input`` from a model response."""
+    action_match = re.search(
+        r"(?im)^\s*Action:\s*([A-Za-z_]\w*)\s*$",
+        text,
+    )
+    input_match = re.search(
+        r"(?im)^\s*Action Input:\s*(\{.*\})\s*$",
+        text,
+    )
+    if not action_match or not input_match:
+        raise ActionParseError(
+            "Thiếu Action hoặc Action Input dạng JSON object."
+        )
     try:
-        response = provider.generate(
+        tool_input = json.loads(input_match.group(1))
+    except json.JSONDecodeError as error:
+        raise ActionParseError(
+            f"Action Input không phải JSON hợp lệ: {error.msg}."
+        ) from error
+    if not isinstance(tool_input, dict):
+        raise ActionParseError(
+            "Action Input phải là một JSON object."
+        )
+    return action_match.group(1), tool_input
+
+
+def _provider_metadata(provider: BaseLLMProvider) -> dict[str, Any]:
+    return {
+        "provider": provider.provider_name,
+        "model": provider.model_name,
+        "is_mock": provider.is_mock,
+    }
+
+
+def run_baseline_chatbot(
+    user_query: str,
+    provider: BaseLLMProvider,
+) -> dict[str, Any]:
+    """Run exactly one LLM call and zero tool calls."""
+    print(f"\n💬 [CHATBOT BASELINE] {user_query}")
+    print("🚫 Tool calls: 0")
+    result = {
+        **_provider_metadata(provider),
+        "status": "success",
+        "answer": "",
+        "llm_calls": 1,
+        "tool_calls": 0,
+    }
+    try:
+        answer = provider.generate(
             user_query,
             system_prompt=CHATBOT_BASELINE_PROMPT,
         )
-    except Exception as error:
-        response = f"[APP ERROR]: Không gọi được LLM Provider - {error}"
+        if not answer.strip():
+            raise ProviderError("Provider trả về nội dung rỗng.")
+    except ProviderError as error:
+        result.update({
+            "status": "provider_error",
+            "error": str(error),
+            "answer": "",
+        })
+        print(f"❌ EXECUTION ERROR: {error}")
+        return result
 
-    if not response or not str(response).strip():
-        response = "[APP ERROR]: Provider trả về câu trả lời rỗng."
-
-    print(f"🤖 Chatbot trả lời:\n{response}")
-    return response
+    result["answer"] = answer
+    print(f"🤖 Final Answer:\n{answer}")
+    return result
 
 
-# ============================================================================
-# MỐC 3: REACT AGENT (Vòng lặp Thought -> Action -> Observation + Guardrails)
-# ============================================================================
+def _react_system_prompt() -> str:
+    return REACT_SYSTEM_PROMPT.format(
+        tool_specs=json.dumps(
+            TOOL_SPECS,
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
-def run_react_agent(user_query: str, provider):
-    """
-    Chạy vòng lặp ReAct Agent có Guardrails MAX_ITERATIONS.
-    """
-    print(f"\n🤖 [REACT AGENT] Câu hỏi: {user_query}")
+
+def run_react_agent(
+    user_query: str,
+    provider: BaseLLMProvider,
+) -> dict[str, Any]:
+    """Run LLM → Action → Tool → Observation until Final Answer."""
+    print(f"\n🤖 [REACT AGENT] {user_query}")
     history = f"User Query: {user_query}"
-    step = 0
-    
-    while step < MAX_ITERATIONS:
-        step += 1
-        print(f"\n--- 🔄 Vòng lặp ReAct (Step {step}/{MAX_ITERATIONS}) ---")
-        
-        response = provider.generate(history, system_prompt=REACT_SYSTEM_PROMPT)
-        print(f"{response}")
-        
+    trace: list[dict[str, Any]] = []
+    seen_actions: set[str] = set()
+    llm_calls = 0
+    tool_calls = 0
+    result: dict[str, Any] = {
+        **_provider_metadata(provider),
+        "status": "guardrail",
+        "final_answer": "",
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "iterations": 0,
+        "guardrail_triggered": False,
+        "trace": trace,
+    }
+
+    for iteration in range(1, MAX_ITERATIONS + 1):
+        print(
+            f"\n--- 🔄 ReAct {iteration}/{MAX_ITERATIONS} "
+            f"(tools {tool_calls}/{MAX_TOOL_CALLS}) ---"
+        )
+        try:
+            response = provider.generate(
+                history,
+                system_prompt=_react_system_prompt(),
+            )
+            llm_calls += 1
+        except ProviderError as error:
+            result.update({
+                "status": "provider_error",
+                "error": str(error),
+                "llm_calls": llm_calls + 1,
+                "tool_calls": tool_calls,
+                "iterations": iteration,
+            })
+            print(f"❌ EXECUTION ERROR: {error}")
+            return result
+
+        print(response)
         if "Final Answer:" in response:
-            break
-            
-        tool_name, args = parse_action(response)
-        if tool_name and tool_name in AVAILABLE_TOOLS:
-            tool_func = AVAILABLE_TOOLS[tool_name]
-            try:
-                obs = tool_func(*args)
-            except Exception as e:
-                obs = f"LỖI THỰC THI TOOL: {str(e)}"
-            print(f"👁️ Observation: {obs}")
-            history += f"\n{response}\nObservation: {obs}"
+            final_answer = response.split(
+                "Final Answer:",
+                1,
+            )[1].strip()
+            result.update({
+                "status": "success",
+                "final_answer": final_answer,
+                "llm_calls": llm_calls,
+                "tool_calls": tool_calls,
+                "iterations": iteration,
+            })
+            return result
+
+        try:
+            tool_name, tool_input = parse_action(response)
+        except ActionParseError as error:
+            result.update({
+                "status": "parse_error",
+                "error": str(error),
+                "llm_calls": llm_calls,
+                "tool_calls": tool_calls,
+                "iterations": iteration,
+                "guardrail_triggered": True,
+            })
+            print(f"🛡️ PARSER GUARDRAIL: {error}")
+            return result
+
+        if tool_calls >= MAX_TOOL_CALLS:
+            result.update({
+                "status": "guardrail",
+                "error": "Đã đạt MAX_TOOL_CALLS.",
+                "llm_calls": llm_calls,
+                "tool_calls": tool_calls,
+                "iterations": iteration,
+                "guardrail_triggered": True,
+            })
+            print("🛡️ GUARDRAIL: Đã đạt giới hạn tool calls.")
+            return result
+
+        signature = json.dumps(
+            [tool_name, tool_input],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if signature in seen_actions:
+            result.update({
+                "status": "guardrail",
+                "error": "Agent lặp lại cùng một Action.",
+                "llm_calls": llm_calls,
+                "tool_calls": tool_calls,
+                "iterations": iteration,
+                "guardrail_triggered": True,
+            })
+            print("🛡️ LOOP GUARDRAIL: Action bị lặp.")
+            return result
+        seen_actions.add(signature)
+
+        observation = execute_tool(tool_name, tool_input)
+        tool_calls += 1
+        if observation.get("ok") is False:
+            result["guardrail_triggered"] = True
+        trace_item = {
+            "iteration": iteration,
+            "thought_action": response,
+            "tool": tool_name,
+            "tool_input": tool_input,
+            "observation": observation,
+        }
+        trace.append(trace_item)
+        print(
+            "👁️ Observation:\n"
+            + json.dumps(
+                observation,
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        history += (
+            f"\n\n{response}\nObservation: "
+            + json.dumps(
+                {
+                    "tool": tool_name,
+                    "result": observation,
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    result.update({
+        "status": "guardrail",
+        "error": "Đã đạt MAX_ITERATIONS mà chưa có Final Answer.",
+        "llm_calls": llm_calls,
+        "tool_calls": tool_calls,
+        "iterations": MAX_ITERATIONS,
+        "guardrail_triggered": True,
+    })
+    print("🛡️ GUARDRAIL: Hết vòng lặp mà chưa có Final Answer.")
+    return result
+
+
+def _parse_cli(
+    arguments: list[str],
+) -> tuple[str, int | None]:
+    mode = "all"
+    selected_id: int | None = None
+    for argument in arguments:
+        normalized = argument.lower()
+        if normalized in {"baseline", "react", "all"}:
+            mode = normalized
+        elif argument.isdigit():
+            selected_id = int(argument)
         else:
-            if "Action:" in response and not tool_name:
-                print(f"👁️ Observation: LỖI: Định dạng Action không hợp lệ hoặc tool không tồn tại.")
-                history += f"\n{response}\nObservation: LỖI: Tool không hợp lệ."
-            else:
-                break
-                
-    if step >= MAX_ITERATIONS and "Final Answer:" not in response:
-        print(f"\n🛡️ GUARDRAIL TRIGGERED: Đã đạt giới hạn tối đa {MAX_ITERATIONS} bước. Ngắt lặp an toàn!")
+            raise ValueError(
+                "Cú pháp: python src/app.py [baseline|react|all] [id]"
+            )
+    return mode, selected_id
 
 
-# ============================================================================
-# ĐIỂM CHẠY CHÍNH
-# ============================================================================
-
-if __name__ == "__main__":
-    print(LINE)
-    print("🏫 ĐẠI HỌC VINUNI - BÀI LAB 3: CHATBOT VS REACT AGENT")
-    print("📌 Đề tài 9: Trợ Lý Sàng Lọc Hồ Sơ Tuyển Dụng & Hẹn Phỏng Vấn")
-    print(LINE)
-
-    provider = get_llm_provider()
-    model_name = getattr(provider, "model_name", "Offline Mock Mode")
-    print(f"🔌 LLM Provider: {provider.__class__.__name__} (Model: {model_name})")
+def main() -> int:
+    try:
+        mode, selected_id = _parse_cli(sys.argv[1:])
+        provider = get_llm_provider()
+    except (ValueError, ProviderError) as error:
+        print(f"❌ CONFIG ERROR: {error}")
+        return 2
 
     tests = load_test_cases()
-    print(f"✅ Đã tải {len(tests)} Test Cases từ config/test_cases.json (Role 1)")
-    print(f"🛠️ Đã nạp {len(TOOL_SPECS)} Tool Specs từ src/tools.py (Role 2)")
+    if selected_id is not None:
+        tests = [
+            case for case in tests
+            if int(case["id"]) == selected_id
+        ]
+        if not tests:
+            print(f"❌ Không tìm thấy test #{selected_id}.")
+            return 2
 
-    # Cho phép chạy 1 test case cụ thể: python src/app.py 5
-    if len(sys.argv) > 1 and sys.argv[1].isdigit():
-        selected_id = int(sys.argv[1])
-        tests = [case for case in tests if case.get("id") == selected_id]
-
-    print(f"\n{LINE}")
-    print("📍 DEMO: CHẠY SO SÁNH CHATBOT BASELINE VS REACT AGENT")
     print(LINE)
+    print("🏫 VINUNI LAB 3 — CHATBOT VS REACT AGENT")
+    print("📌 Chủ đề 9: Sàng lọc hồ sơ và hẹn phỏng vấn")
+    print(LINE)
+    print(
+        f"🔌 Provider thực tế: {provider.provider_name} "
+        f"({provider.model_name})"
+    )
+    print(f"🧪 Mode: {mode}; Test cases: {len(tests)}")
+    print(f"🛠️ Tools: {', '.join(sorted(TOOL_REGISTRY))}")
+    if provider.is_mock:
+        print("⚠️ OFFLINE MOCK — không dùng để chấm năng lực LLM.")
 
+    reset_mock_state()
+    summary: list[dict[str, Any]] = []
+    provider_failed = False
     for case in tests:
         print(f"\n{LINE}")
-        print(f"🧪 TEST CASE #{case.get('id')} | {case.get('category')}")
-        print(f"❓ Câu hỏi: {case.get('question')}")
-        print(f"📌 Kỳ vọng (Role 1): {case.get('expected_behavior')}")
+        print(f"TEST #{case['id']} | {case['category']}")
+        print(f"❓ {case['question']}")
+        print(f"📌 Expected: {case['expected_behavior']}")
         print(LINE)
 
-        if "Đơn giản" in case.get("category", ""):
-            print("--- DEMO 1: CHẠY TRÊN CHATBOT BASELINE ---")
-            run_baseline_chatbot(case.get("question", ""), provider)
-        else:
-            print("--- DEMO 2: CHẠY TRÊN REACT AGENT ---")
-            run_react_agent(case.get("question", ""), provider)
+        case_result: dict[str, Any] = {"id": case["id"]}
+        if mode in {"baseline", "all"}:
+            baseline = run_baseline_chatbot(
+                case["question"],
+                provider,
+            )
+            case_result["baseline"] = baseline
+            if baseline["status"] == "provider_error":
+                summary.append(case_result)
+                provider_failed = True
+                print("⛔ Dừng suite vì provider không khả dụng.")
+                break
+
+        if mode in {"react", "all"}:
+            agent = run_react_agent(
+                case["question"],
+                provider,
+            )
+            case_result["agent"] = agent
+            if agent["status"] == "provider_error":
+                summary.append(case_result)
+                provider_failed = True
+                print("⛔ Dừng suite vì provider không khả dụng.")
+                break
+        summary.append(case_result)
 
     print(f"\n{LINE}")
-    print("👀 QUAN SÁT CHO ROLE 5 (docs/trace_eval.md):")
-    print("   - Câu 🟢 Đơn giản: Chatbot trả lời tốt bằng kiến thức chung.")
-    print("   - Câu 🟡 Multi-step: ReAct Agent gọi Tool sàng lọc CV/lịch thực tế.")
-    print("   - Câu 🔴 Edge Case: ReAct Agent kích hoạt phanh Guardrail ngắt lặp an toàn.")
+    print("📊 RUN SUMMARY")
+    for item in summary:
+        labels = []
+        if "baseline" in item:
+            labels.append(
+                "baseline=" + item["baseline"]["status"]
+            )
+        if "agent" in item:
+            agent = item["agent"]
+            labels.append(
+                "agent="
+                f"{agent['status']}"
+                f"/llm:{agent['llm_calls']}"
+                f"/tools:{agent['tool_calls']}"
+                f"/guardrail:{agent['guardrail_triggered']}"
+            )
+        print(f"- TC#{item['id']}: {', '.join(labels)}")
     print(LINE)
+    return 1 if provider_failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

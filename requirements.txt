@@ -1,6 +1,8 @@
-google-genai
-openai
-anthropic
-python-dotenv
-requests
+google-genai==1.53.0
+pydantic==2.12.4
+pydantic-core==2.41.5
+openai>=2,<3
+anthropic>=0.70,<1
+python-dotenv>=1,<2
+requests>=2.32,<3
 

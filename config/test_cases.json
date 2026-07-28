@@ -19,7 +19,7 @@
   },
   {
     "id": 4,
-    "category": "🟡 Multi-step (Cần gọi 2 Tools)",
+    "category": "🟡 Multi-step (Cần gọi 3 Tools)",
     "question": "Hãy đánh giá độ phù hợp của hồ sơ ứng viên Trần Thị Bích so với yêu cầu vị trí 'Senior Python Developer', sau đó kiểm tra lịch trống của interviewer 'Lê Văn C' và đặt lịch phỏng vấn cho ứng viên.",
     "expected_behavior": "Agent gọi tool sàng lọc CV (screen_candidate_cv) để đánh giá độ tương thích, tiếp theo gọi tool tra cứu lịch (check_interviewer_schedule) và tool đặt lịch phỏng vấn (schedule_interview) để hoàn tất quy trình."
   },
