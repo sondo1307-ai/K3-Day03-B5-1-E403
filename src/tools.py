@@ -1443,6 +1443,267 @@ def execute_tool(
     return result
 
 
+# ============================================================================
+# 7. DỮ LIỆU MOCK CHO 5 TEST CASE CỦA ROLE 1
+# ============================================================================
+
+MOCK_TEST_CASES: list[dict[str, Any]] = [
+    {
+        "id": 1,
+        "category": "🟢 Đơn giản (Chỉ cần LLM)",
+        "question": (
+            "Nêu 3 tiêu chí quan trọng nhất khi đánh giá một CV cho "
+            "vị trí Senior Python Developer?"
+        ),
+        "expected_tool_calls": [],
+        "expected_error_codes": [],
+        "expected_behavior": (
+            "LLM trả lời trực tiếp từ kiến thức tuyển dụng, "
+            "không gọi tool."
+        ),
+        # Gợi ý nội dung để Role 1 đối chiếu câu trả lời của LLM.
+        "reference_answer_points": [
+            "Kỹ năng bắt buộc: Python, FastAPI, SQL, Git.",
+            "Số năm kinh nghiệm backend so với mức tối thiểu của JD.",
+            "Bằng chứng dự án thực tế và mức độ chịu trách nhiệm.",
+        ],
+    },
+    {
+        "id": 2,
+        "category": "🟢 Đơn giản (Chỉ cần LLM)",
+        "question": (
+            "Gợi ý 3 câu hỏi phỏng vấn kỹ thuật phù hợp dành cho "
+            "ứng viên Backend Developer (Python/FastAPI)."
+        ),
+        "expected_tool_calls": [],
+        "expected_error_codes": [],
+        "expected_behavior": (
+            "LLM tự đưa ra câu hỏi phỏng vấn, không gọi tool."
+        ),
+        "reference_answer_points": [
+            "Phân biệt sync và async trong FastAPI.",
+            "Cách thiết kế và version hóa REST API.",
+            "Cách tối ưu truy vấn SQL khi dữ liệu lớn.",
+        ],
+    },
+    {
+        "id": 3,
+        "category": "🟡 Multi-step (Cần Tool)",
+        "question": (
+            "Hãy tra cứu hồ sơ của ứng viên Nguyễn Văn An và cho biết "
+            "kinh nghiệm làm việc cùng các kỹ năng chính của ứng viên này."
+        ),
+        "expected_tool_calls": [
+            {
+                "tool_name": "search_candidate_cv",
+                "tool_input": {
+                    "candidate_name": "Nguyễn Văn An",
+                },
+                "expect_ok": True,
+            },
+        ],
+        "expected_error_codes": [],
+        "expected_behavior": (
+            "Agent gọi search_candidate_cv để lấy dữ liệu C001 và "
+            "tóm tắt kinh nghiệm cùng kỹ năng cho HR."
+        ),
+        "reference_answer_points": [
+            "3.0 năm kinh nghiệm.",
+            "Kỹ năng chính: Python, FastAPI, SQL, Git.",
+        ],
+    },
+    {
+        "id": 4,
+        "category": "🟡 Multi-step (Cần gọi 2 Tools)",
+        "question": (
+            "Hãy đánh giá độ phù hợp của hồ sơ ứng viên Trần Thị Bích "
+            "so với yêu cầu vị trí 'Senior Python Developer', sau đó "
+            "kiểm tra lịch trống của interviewer 'Lê Văn C' và đặt lịch "
+            "phỏng vấn cho ứng viên."
+        ),
+        "expected_tool_calls": [
+            {
+                "tool_name": "screen_candidate_cv",
+                "tool_input": {
+                    "candidate_name": "Trần Thị Bích",
+                    "job_title": "Senior Python Developer",
+                },
+                "expect_ok": True,
+            },
+            {
+                "tool_name": "check_interviewer_schedule",
+                "tool_input": {
+                    "interviewer_name": "Lê Văn C",
+                    "start_date": "2026-08-10",
+                    "end_date": "2026-08-12",
+                },
+                "expect_ok": True,
+            },
+            {
+                "tool_name": "schedule_interview",
+                "tool_input": {
+                    "candidate_name": "Trần Thị Bích",
+                    "job_title": "Senior Python Developer",
+                    "interviewer_name": "Lê Văn C",
+                    "slot_id": "SLOT001",
+                    "confirmed": True,
+                },
+                "expect_ok": True,
+            },
+        ],
+        "expected_error_codes": [],
+        "expected_behavior": (
+            "Agent chạy đủ chuỗi screen → check schedule → schedule. "
+            "Ứng viên C002 đạt điểm cao và slot SLOT001 chuyển sang booked."
+        ),
+        "reference_answer_points": [
+            "Điểm sàng lọc 100 và fit_level strong_match.",
+            "Lê Văn C còn 3 slot trống trong khoảng 10-12/08/2026.",
+            "Lịch phỏng vấn 2026-08-10 09:00 được tạo.",
+        ],
+    },
+    {
+        "id": 5,
+        "category": "🔴 Edge Case (Bẫy Guardrail)",
+        "question": (
+            "Hãy đặt lịch hẹn phỏng vấn cho ứng viên không có trên hệ "
+            "thống 'Phạm Hoàng Nam' vào ngày 31/02/2026 với interviewer "
+            "'Trần Văn D'."
+        ),
+        "expected_tool_calls": [
+            {
+                "tool_name": "search_candidate_cv",
+                "tool_input": {
+                    "candidate_name": "Phạm Hoàng Nam",
+                },
+                "expect_ok": False,
+                "expect_error_code": "CANDIDATE_NOT_FOUND",
+            },
+            {
+                "tool_name": "check_interviewer_schedule",
+                "tool_input": {
+                    "interviewer_name": "Trần Văn D",
+                    "start_date": "31/02/2026",
+                    "end_date": "31/02/2026",
+                },
+                "expect_ok": False,
+                "expect_error_code": "INVALID_DATE",
+            },
+            {
+                "tool_name": "schedule_interview",
+                "tool_input": {
+                    "candidate_name": "Phạm Hoàng Nam",
+                    "job_title": "Senior Python Developer",
+                    "interviewer_name": "Trần Văn D",
+                    "slot_id": "SLOT005",
+                    "confirmed": True,
+                },
+                "expect_ok": False,
+                "expect_error_code": "CANDIDATE_NOT_FOUND",
+            },
+        ],
+        "expected_error_codes": [
+            "CANDIDATE_NOT_FOUND",
+            "INVALID_DATE",
+        ],
+        "expected_behavior": (
+            "Tool trả structured error thay vì crash. Agent nhận "
+            "Observation lỗi, dừng sau tối đa MAX_ITERATIONS bước và "
+            "phản hồi lịch sự rằng không thể đặt lịch."
+        ),
+        "reference_answer_points": [
+            "Không tìm thấy ứng viên Phạm Hoàng Nam.",
+            "Ngày 31/02/2026 không tồn tại.",
+            "Không có lịch phỏng vấn nào được tạo.",
+        ],
+    },
+]
+
+
+def get_mock_test_case(case_id: int) -> dict[str, Any] | None:
+    """Lấy một mock test case theo id."""
+    for case in MOCK_TEST_CASES:
+        if case["id"] == case_id:
+            return deepcopy(case)
+
+    return None
+
+
+def run_mock_test_case(case_id: int) -> dict[str, Any]:
+    """
+    Chạy chuỗi tool mock của một test case và so với kỳ vọng.
+
+    Dùng để Role 1 kiểm tra tool trước khi ghép vào ReAct loop.
+    """
+    case = get_mock_test_case(case_id)
+
+    if case is None:
+        return _error(
+            f"Không tìm thấy mock test case {case_id}.",
+            error_code="TEST_CASE_NOT_FOUND",
+            details={
+                "available_ids": [item["id"] for item in MOCK_TEST_CASES],
+            },
+        )
+
+    steps: list[dict[str, Any]] = []
+    passed = True
+
+    for expected_call in case["expected_tool_calls"]:
+        observation = execute_tool(
+            expected_call["tool_name"],
+            expected_call["tool_input"],
+        )
+
+        ok_matched = (
+            observation.get("ok") is expected_call["expect_ok"]
+        )
+
+        expected_error_code = expected_call.get("expect_error_code")
+        error_code_matched = (
+            expected_error_code is None
+            or observation.get("error_code") == expected_error_code
+        )
+
+        step_passed = ok_matched and error_code_matched
+        passed = passed and step_passed
+
+        steps.append(
+            {
+                "tool_name": expected_call["tool_name"],
+                "tool_input": deepcopy(expected_call["tool_input"]),
+                "observation": observation,
+                "passed": step_passed,
+            }
+        )
+
+    return _success(
+        case_id=case["id"],
+        category=case["category"],
+        question=case["question"],
+        requires_tool=bool(case["expected_tool_calls"]),
+        passed=passed,
+        steps=steps,
+        expected_behavior=case["expected_behavior"],
+    )
+
+
+def run_all_mock_test_cases() -> dict[str, Any]:
+    """Chạy toàn bộ 5 mock test case trên state sạch."""
+    reset_mock_state()
+
+    results = [
+        run_mock_test_case(case["id"])
+        for case in MOCK_TEST_CASES
+    ]
+
+    return _success(
+        total=len(results),
+        passed=sum(1 for result in results if result["passed"]),
+        results=results,
+    )
+
+
 def reset_mock_state() -> None:
     """Khôi phục dữ liệu lịch để chạy lại test."""
     INTERVIEWS.clear()
@@ -1470,33 +1731,21 @@ def reset_mock_state() -> None:
 if __name__ == "__main__":
     import json
 
-    demo = {
-        "tc3_search_cv": search_candidate_cv(
-            "Nguyễn Văn An",
-        ),
-        "tc4_screen": screen_candidate_cv(
-            "Trần Thị Bích",
-            "Senior Python Developer",
-        ),
-        "tc4_schedule": check_interviewer_schedule(
-            "Lê Văn C",
-            "2026-08-10",
-            "2026-08-12",
-        ),
-        "tc5_missing_candidate": search_candidate_cv(
-            "Phạm Hoàng Nam",
-        ),
-        "tc5_invalid_date": check_interviewer_schedule(
-            "Trần Văn D",
-            "31/02/2026",
-            "31/02/2026",
-        ),
-    }
+    report = run_all_mock_test_cases()
 
     print(
         json.dumps(
-            demo,
+            report,
             ensure_ascii=False,
             indent=2,
         )
     )
+
+    for result in report["results"]:
+        status = "PASS" if result["passed"] else "FAIL"
+        tool_mode = "TOOL" if result["requires_tool"] else "LLM"
+
+        print(
+            f"[{status}] Test case {result['case_id']} "
+            f"({tool_mode}) — {result['category']}"
+        )
