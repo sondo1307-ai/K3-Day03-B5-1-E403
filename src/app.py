@@ -1,314 +1,179 @@
 """
-RecruitMate Full Mock App.
+🚀 CORE AGENT APP (Dành cho Role 4: Core Developer / Integrator)
+Đề tài 9: Trợ Lý Sàng Lọc Hồ Sơ Tuyển Dụng & Hẹn Phỏng Vấn.
 
-Cách chạy:
-    python src/app.py baseline
-    python src/app.py react
-    python src/app.py all
-    python src/app.py react 4
+File chính ghép nối tất cả các thành phần của nhóm:
+    - config/test_cases.json (Role 1)
+    - src/tools.py           (Role 2)
+    - src/prompts.py         (Role 3)
+    - src/providers.py       (Multi-Provider LLM Adapter)
 """
-
-from __future__ import annotations
 
 import json
 import os
 import sys
-from typing import Any
+import re
+from dotenv import load_dotenv
 
+# Đảm bảo import các module cùng thư mục src/ hoạt động mượt mà
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
-
-if CURRENT_DIR not in sys.path:
-    sys.path.insert(0, CURRENT_DIR)
-
-if sys.stdout.encoding != "utf-8":
+# Đảm bảo in ra Tiếng Việt và Emojis không bị lỗi trên Windows Console
+if sys.stdout.encoding != 'utf-8':
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
 
-
-from mock_data import MOCK_BASELINE_ANSWERS, MOCK_REACT_PLANS
-from prompts import CHATBOT_BASELINE_PROMPT, MAX_ITERATIONS
+# Import các thành phần từ file của Role 2, Role 3 & Multi-Provider Adapter
+from tools import TOOL_SPECS, TOOL_REGISTRY, AVAILABLE_TOOLS, execute_tool
+from prompts import CHATBOT_BASELINE_PROMPT, REACT_SYSTEM_PROMPT, MAX_ITERATIONS
 from providers import get_llm_provider
-from tools import (
-    TOOL_REGISTRY,
-    TOOL_SPECS,
-    execute_tool,
-    reset_mock_state,
-)
+
+load_dotenv()
+
+LINE = "=" * 70
 
 
-LINE = "=" * 78
+def load_test_cases():
+    """Đọc bộ test cases từ config/test_cases.json của Role 1."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    config_path = os.path.join(base_dir, "config", "test_cases.json")
+
+    # Fallback kiểm tra nếu file ở thư mục hiện tại
+    if not os.path.exists(config_path):
+        config_path = "test_cases.json"
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def load_test_cases() -> list[dict[str, Any]]:
-    path = os.path.join(PROJECT_ROOT, "config", "test_cases.json")
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
+def parse_action(text: str):
+    """Trích xuất tên tool và tham số từ dạng Action: tool_name[arg1, arg2]"""
+    match = re.search(r"Action:\s*(\w+)\[(.*?)\]", text, re.IGNORECASE)
+    if not match:
+        return None, []
+    tool_name = match.group(1).strip()
+    raw_args = match.group(2).strip()
+    if not raw_args:
+        args = []
+    else:
+        args = [a.strip(" '\"") for a in raw_args.split(",")]
+    return tool_name, args
 
 
-def run_baseline_chatbot(
-    user_query: str,
-    provider: Any,
-) -> str:
-    print(f"\n💬 [FULL MOCK BASELINE] {user_query}")
-    print("🚫 Tool: không sử dụng")
+# ============================================================================
+# MỐC 2: BASELINE CHATBOT (Chatbot gốc - KHÔNG có công cụ)
+# ============================================================================
 
-    answer = provider.generate(
-        user_query,
-        system_prompt=CHATBOT_BASELINE_PROMPT,
-    )
+def run_baseline_chatbot(user_query: str, provider) -> str:
+    """
+    Chạy Chatbot gốc (Baseline): chỉ có LLM + System Prompt, KHÔNG được gọi Tool.
+    """
+    print(f"\n💬 [CHATBOT BASELINE] Câu hỏi: {user_query}")
+    print("🚫 Công cụ khả dụng: KHÔNG CÓ (baseline chỉ dùng kiến thức sẵn có của LLM)")
 
-    print(f"🤖 Final Answer:\n{answer}")
-    return answer
-
-
-def run_baseline_on_test_cases(
-    tests: list[dict[str, Any]],
-    provider: Any,
-) -> list[dict[str, Any]]:
-    logs = []
-
-    for case in tests:
-        print(f"\n{LINE}")
-        print(f"🧪 TC#{case['id']} | {case['category']}")
-        print(LINE)
-
-        answer = run_baseline_chatbot(case["question"], provider)
-
-        logs.append({
-            "id": case["id"],
-            "question": case["question"],
-            "answer": answer,
-        })
-
-    return logs
-
-
-def _build_final_answer(
-    case_id: int,
-    trace: list[dict[str, Any]],
-) -> str:
-    if case_id == 3 and trace:
-        observation = trace[-1]["observation"]
-        if observation.get("ok"):
-            summary = observation["summary"]
-            skills = ", ".join(summary["skills"])
-            return (
-                f"{summary['name']} có "
-                f"{summary['years_experience']} năm kinh nghiệm. "
-                f"Các kỹ năng chính gồm: {skills}."
-            )
-
-    if case_id == 4 and trace:
-        last = trace[-1]["observation"]
-
-        if last.get("ok") and "interview" in last:
-            interview = last["interview"]
-            screening = last["screening_summary"]
-
-            return (
-                f"Trần Thị Bích đạt {screening['score']} điểm, "
-                f"mức phù hợp {screening['fit_level']}. "
-                f"Lịch phỏng vấn đã được tạo với "
-                f"{interview['interviewer_name']} tại "
-                f"{interview['start_time']}–{interview['end_time']} "
-                f"({interview['slot_id']}). "
-                "Kết quả sàng lọc vẫn cần HR xem xét."
-            )
-
-    if case_id == 5 and trace:
-        observation = trace[-1]["observation"]
-
-        if not observation.get("ok"):
-            return (
-                "Không thể đặt lịch phỏng vấn. "
-                f"Lý do: {observation.get('error')}. "
-                "Hệ thống không thực hiện thay đổi nào."
-            )
-
-    return "[MOCK FINAL ANSWER NOT FOUND]"
-
-
-def run_mock_react_agent(
-    case: dict[str, Any],
-) -> dict[str, Any]:
-    case_id = int(case["id"])
-    question = case["question"]
-
-    print(f"\n🤖 [FULL MOCK REACT] {question}")
-    print(
-        "🛠️ Tools:",
-        ", ".join(sorted(TOOL_REGISTRY)),
-    )
-
-    # TC1 và TC2: trả dữ liệu mock trực tiếp, không gọi tool.
-    if case_id in (1, 2):
-        answer = MOCK_BASELINE_ANSWERS.get(
-            question,
-            "[MOCK DATA NOT FOUND]",
+    try:
+        response = provider.generate(
+            user_query,
+            system_prompt=CHATBOT_BASELINE_PROMPT,
         )
-        print("Thought: Câu hỏi có câu trả lời mock trực tiếp.")
-        print(f"Final Answer:\n{answer}")
+    except Exception as error:
+        response = f"[APP ERROR]: Không gọi được LLM Provider - {error}"
 
-        return {
-            "id": case_id,
-            "ok": True,
-            "trace": [],
-            "final_answer": answer,
-        }
+    if not response or not str(response).strip():
+        response = "[APP ERROR]: Provider trả về câu trả lời rỗng."
 
-    plan = MOCK_REACT_PLANS.get(case_id)
-    if not plan:
-        return {
-            "id": case_id,
-            "ok": False,
-            "trace": [],
-            "final_answer": "[MOCK PLAN NOT FOUND]",
-        }
+    print(f"🤖 Chatbot trả lời:\n{response}")
+    return response
 
-    trace: list[dict[str, Any]] = []
 
-    for iteration, step in enumerate(plan, start=1):
-        if iteration > MAX_ITERATIONS:
-            observation = {
-                "ok": False,
-                "error_code": "MAX_ITERATIONS_REACHED",
-                "error": "Đã đạt giới hạn số vòng lặp.",
-            }
-            print(
-                "Observation:",
-                json.dumps(observation, ensure_ascii=False),
-            )
+# ============================================================================
+# MỐC 3: REACT AGENT (Vòng lặp Thought -> Action -> Observation + Guardrails)
+# ============================================================================
+
+def run_react_agent(user_query: str, provider):
+    """
+    Chạy vòng lặp ReAct Agent có Guardrails MAX_ITERATIONS.
+    """
+    print(f"\n🤖 [REACT AGENT] Câu hỏi: {user_query}")
+    history = f"User Query: {user_query}"
+    step = 0
+    
+    while step < MAX_ITERATIONS:
+        step += 1
+        print(f"\n--- 🔄 Vòng lặp ReAct (Step {step}/{MAX_ITERATIONS}) ---")
+        
+        response = provider.generate(history, system_prompt=REACT_SYSTEM_PROMPT)
+        print(f"{response}")
+        
+        if "Final Answer:" in response:
             break
-
-        thought = step["thought"]
-        action = step["action"]
-        action_input = step["action_input"]
-
-        print(f"\nIteration {iteration}")
-        print(f"Thought: {thought}")
-        print(f"Action: {action}")
-        print(
-            "Action Input:",
-            json.dumps(action_input, ensure_ascii=False),
-        )
-
-        observation = execute_tool(action, action_input)
-
-        print(
-            "Observation:",
-            json.dumps(
-                observation,
-                ensure_ascii=False,
-                indent=2,
-            ),
-        )
-
-        trace.append({
-            "iteration": iteration,
-            "thought": thought,
-            "action": action,
-            "action_input": action_input,
-            "observation": observation,
-        })
-
-        # Guardrail: gặp lỗi thì dừng.
-        if not observation.get("ok"):
-            break
-
-    final_answer = _build_final_answer(case_id, trace)
-    print(f"\nFinal Answer:\n{final_answer}")
-
-    return {
-        "id": case_id,
-        "ok": True,
-        "trace": trace,
-        "final_answer": final_answer,
-    }
+            
+        tool_name, args = parse_action(response)
+        if tool_name and tool_name in AVAILABLE_TOOLS:
+            tool_func = AVAILABLE_TOOLS[tool_name]
+            try:
+                obs = tool_func(*args)
+            except Exception as e:
+                obs = f"LỖI THỰC THI TOOL: {str(e)}"
+            print(f"👁️ Observation: {obs}")
+            history += f"\n{response}\nObservation: {obs}"
+        else:
+            if "Action:" in response and not tool_name:
+                print(f"👁️ Observation: LỖI: Định dạng Action không hợp lệ hoặc tool không tồn tại.")
+                history += f"\n{response}\nObservation: LỖI: Tool không hợp lệ."
+            else:
+                break
+                
+    if step >= MAX_ITERATIONS and "Final Answer:" not in response:
+        print(f"\n🛡️ GUARDRAIL TRIGGERED: Đã đạt giới hạn tối đa {MAX_ITERATIONS} bước. Ngắt lặp an toàn!")
 
 
-def run_react_on_test_cases(
-    tests: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    reset_mock_state()
-    logs = []
+# ============================================================================
+# ĐIỂM CHẠY CHÍNH
+# ============================================================================
 
-    for case in tests:
-        print(f"\n{LINE}")
-        print(f"🧪 TC#{case['id']} | {case['category']}")
-        print(LINE)
-
-        logs.append(run_mock_react_agent(case))
-
-    return logs
-
-
-def select_tests(
-    tests: list[dict[str, Any]],
-    selected_id: int | None,
-) -> list[dict[str, Any]]:
-    if selected_id is None:
-        return tests
-
-    selected = [
-        case for case in tests
-        if int(case.get("id", -1)) == selected_id
-    ]
-
-    if not selected:
-        raise ValueError(
-            f"Không tìm thấy Test Case id={selected_id}."
-        )
-
-    return selected
-
-
-def main() -> None:
+if __name__ == "__main__":
     print(LINE)
-    print("🏫 VINUNI LAB 3 — RECRUITMATE FULL MOCK")
-    print("📌 Toàn bộ câu trả lời, dữ liệu và Action đều là mock")
+    print("🏫 ĐẠI HỌC VINUNI - BÀI LAB 3: CHATBOT VS REACT AGENT")
+    print("📌 Đề tài 9: Trợ Lý Sàng Lọc Hồ Sơ Tuyển Dụng & Hẹn Phỏng Vấn")
     print(LINE)
 
     provider = get_llm_provider()
+    model_name = getattr(provider, "model_name", "Offline Mock Mode")
+    print(f"🔌 LLM Provider: {provider.__class__.__name__} (Model: {model_name})")
+
     tests = load_test_cases()
+    print(f"✅ Đã tải {len(tests)} Test Cases từ config/test_cases.json (Role 1)")
+    print(f"🛠️ Đã nạp {len(TOOL_SPECS)} Tool Specs từ src/tools.py (Role 2)")
 
-    mode = "all"
-    selected_id: int | None = None
+    # Cho phép chạy 1 test case cụ thể: python src/app.py 5
+    if len(sys.argv) > 1 and sys.argv[1].isdigit():
+        selected_id = int(sys.argv[1])
+        tests = [case for case in tests if case.get("id") == selected_id]
 
-    if len(sys.argv) >= 2:
-        mode = sys.argv[1].lower()
+    print(f"\n{LINE}")
+    print("📍 DEMO: CHẠY SO SÁNH CHATBOT BASELINE VS REACT AGENT")
+    print(LINE)
 
-    if len(sys.argv) >= 3 and sys.argv[2].isdigit():
-        selected_id = int(sys.argv[2])
-
-    tests = select_tests(tests, selected_id)
-
-    print(
-        f"🔌 Provider: {provider.__class__.__name__} "
-        f"({provider.model_name})"
-    )
-    print(f"✅ Test cases: {len(tests)}")
-    print(f"🛠️ Tool Specs: {len(TOOL_SPECS)}")
-
-    if mode not in {"baseline", "react", "all"}:
-        print("❌ Mode hợp lệ: baseline, react, all")
-        sys.exit(1)
-
-    if mode in {"baseline", "all"}:
+    for case in tests:
         print(f"\n{LINE}")
-        print("📍 BASELINE FULL MOCK")
+        print(f"🧪 TEST CASE #{case.get('id')} | {case.get('category')}")
+        print(f"❓ Câu hỏi: {case.get('question')}")
+        print(f"📌 Kỳ vọng (Role 1): {case.get('expected_behavior')}")
         print(LINE)
-        run_baseline_on_test_cases(tests, provider)
 
-    if mode in {"react", "all"}:
-        print(f"\n{LINE}")
-        print("📍 REACT FULL MOCK")
-        print(LINE)
-        run_react_on_test_cases(tests)
+        if "Đơn giản" in case.get("category", ""):
+            print("--- DEMO 1: CHẠY TRÊN CHATBOT BASELINE ---")
+            run_baseline_chatbot(case.get("question", ""), provider)
+        else:
+            print("--- DEMO 2: CHẠY TRÊN REACT AGENT ---")
+            run_react_agent(case.get("question", ""), provider)
 
-
-if __name__ == "__main__":
-    main()
+    print(f"\n{LINE}")
+    print("👀 QUAN SÁT CHO ROLE 5 (docs/trace_eval.md):")
+    print("   - Câu 🟢 Đơn giản: Chatbot trả lời tốt bằng kiến thức chung.")
+    print("   - Câu 🟡 Multi-step: ReAct Agent gọi Tool sàng lọc CV/lịch thực tế.")
+    print("   - Câu 🔴 Edge Case: ReAct Agent kích hoạt phanh Guardrail ngắt lặp an toàn.")
+    print(LINE)
