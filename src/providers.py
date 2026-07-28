@@ -31,7 +31,7 @@ class GeminiProvider(BaseLLMProvider):
         self.model_name = model or os.getenv("LLM_MODEL") or "gemini-3.5-flash"
         
     def generate(self, prompt: str, system_prompt: str = "") -> str:
-        if not self.api_key or self.api_key == "your_gemini_api_key_here":
+        if not self.api_key or self.api_key == "GEMINI_API_KEY":
             return "[Gemini Error]: Chưa cấu hình GEMINI_API_KEY trong file .env!"
         try:
             from google import genai
