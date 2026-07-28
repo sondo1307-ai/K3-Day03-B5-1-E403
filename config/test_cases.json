@@ -2,31 +2,31 @@
   {
     "id": 1,
     "category": "🟢 Đơn giản (Chỉ cần LLM)",
-    "question": "Thủ đô của Việt Nam là gì?",
-    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn."
+    "question": "Nêu 3 tiêu chí quan trọng nhất khi đánh giá một CV cho vị trí Senior Python Developer?",
+    "expected_behavior": "Chatbot/LLM trả lời trực tiếp từ kiến thức chuyên môn về tuyển dụng mà không cần gọi công cụ."
   },
   {
     "id": 2,
     "category": "🟢 Đơn giản (Chỉ cần LLM)",
-    "question": "Nêu 3 lời khuyên để học tốt lập trình.",
-    "expected_behavior": "Chatbot trả lời trực tiếp từ kiến thức có sẵn."
+    "question": "Gợi ý 3 câu hỏi phỏng vấn kỹ thuật phù hợp dành cho ứng viên Backend Developer (Python/FastAPI).",
+    "expected_behavior": "Chatbot/LLM trả lời trực tiếp các câu hỏi phỏng vấn kỹ thuật mà không cần gọi công cụ."
   },
   {
     "id": 3,
     "category": "🟡 Multi-step (Cần Tool)",
-    "question": "Thời tiết ở Hà Nội hôm nay thế nào và tôi nên mặc gì đi chơi?",
-    "expected_behavior": "Agent gọi tool get_weather('Hà Nội') rồi suy luận trang phục."
+    "question": "Hãy tra cứu hồ sơ của ứng viên Nguyễn Văn An và cho biết kinh nghiệm làm việc cùng các kỹ năng chính của ứng viên này.",
+    "expected_behavior": "Agent gọi công cụ tra cứu CV (ví dụ: search_candidate_cv) để lấy dữ liệu thực tế của ứng viên Nguyễn Văn An và tóm tắt thông tin cho HR."
   },
   {
     "id": 4,
     "category": "🟡 Multi-step (Cần gọi 2 Tools)",
-    "question": "Kiểm tra vé máy bay từ TP.HCM đi Hà Nội ngày mai và dự báo thời tiết ở Hà Nội.",
-    "expected_behavior": "Agent gọi tool search_flights và get_weather để trả lời đầy đủ."
+    "question": "Hãy đánh giá độ phù hợp của hồ sơ ứng viên Trần Thị Bích so với yêu cầu vị trí 'Senior Python Developer', sau đó kiểm tra lịch trống của interviewer 'Lê Văn C' và đặt lịch phỏng vấn cho ứng viên.",
+    "expected_behavior": "Agent gọi tool sàng lọc CV (screen_candidate_cv) để đánh giá độ tương thích, tiếp theo gọi tool tra cứu lịch (check_interviewer_schedule) và tool đặt lịch phỏng vấn (schedule_interview) để hoàn tất quy trình."
   },
   {
     "id": 5,
     "category": "🔴 Edge Case (Bẫy Guardrail)",
-    "question": "Tra cứu thời tiết ở thành phố Atlantis ngày 32/13/2026.",
-    "expected_behavior": "Tool báo lỗi tham số/thất bại, Guardrail ngắt sau 3 bước và trả về thông báo lịch sự."
+    "question": "Hãy đặt lịch hẹn phỏng vấn cho ứng viên không có trên hệ thống 'Phạm Hoàng Nam' vào ngày 31/02/2026 với interviewer 'Trần Văn D'.",
+    "expected_behavior": "Tool báo lỗi do ứng viên không tồn tại hoặc ngày tháng không hợp lệ (31/02/2026). Agent nhận Observation lỗi, kích hoạt phanh an toàn Guardrail sau tối đa MAX_ITERATIONS bước và đưa ra phản hồi xử lý ngoại lệ lịch sự."
   }
 ]
