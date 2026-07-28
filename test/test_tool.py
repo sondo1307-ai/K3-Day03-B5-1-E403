@@ -1,18 +1,17 @@
 """
-Chạy test thủ công cho src/tools.py.
+Test thủ công Role 2 — bám đúng test case Role 1.
 
 Cấu trúc:
     project/
     ├── src/
     │   └── tools.py
+    ├── config/
+    │   └── test_cases.json
     └── test/
         └── test_tool.py
 
-Lệnh chạy từ thư mục gốc dự án:
+Chạy từ thư mục gốc:
     python test/test_tool.py
-
-Windows CMD:
-    python test\test_tool.py
 """
 
 from __future__ import annotations
@@ -27,18 +26,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 
 from src.tools import (  # noqa: E402
-    evaluate_candidate,
+    TOOL_REGISTRY,
+    check_interviewer_schedule,
     execute_tool,
-    get_available_slots,
-    get_candidate_profile,
     get_job_requirements,
     reset_mock_state,
     schedule_interview,
+    screen_candidate_cv,
+    search_candidate_cv,
 )
 
 
 def show(title: str, result: dict) -> None:
-    """In kết quả test dễ đọc."""
     print("\n" + "=" * 80)
     print(title)
     print("=" * 80)
@@ -46,7 +45,6 @@ def show(title: str, result: dict) -> None:
 
 
 def assert_ok(result: dict) -> None:
-    """Kiểm tra tool trả kết quả thành công."""
     assert result.get("ok") is True, result
 
 
@@ -54,166 +52,172 @@ def assert_error(
     result: dict,
     expected_code: str,
 ) -> None:
-    """Kiểm tra tool trả đúng error_code."""
     assert result.get("ok") is False, result
     assert result.get("error_code") == expected_code, result
 
 
 def main() -> None:
-    """Chạy toàn bộ test thủ công."""
     reset_mock_state()
 
     # ------------------------------------------------------------------------
-    # 1. HỒ SƠ ỨNG VIÊN
+    # TEST CASE 1 VÀ 2
+    # Chỉ cần LLM nên không gọi tool.
+    # Role 2 chỉ xác nhận không cần tool mới.
     # ------------------------------------------------------------------------
 
-    result = get_candidate_profile("C001")
+    expected_tools = {
+        "search_candidate_cv",
+        "screen_candidate_cv",
+        "check_interviewer_schedule",
+        "schedule_interview",
+    }
+
+    assert expected_tools.issubset(TOOL_REGISTRY)
+
+    print("\nTC1 và TC2: Chatbot path, không cần gọi tool.")
+
+    # ------------------------------------------------------------------------
+    # TEST CASE 3
+    # Tra cứu Nguyễn Văn An.
+    # ------------------------------------------------------------------------
+
+    result = search_candidate_cv("Nguyễn Văn An")
+    assert_ok(result)
+    assert result["candidate"]["name"] == "Nguyễn Văn An"
+    assert result["summary"]["years_experience"] == 3.0
+    assert "Python" in result["summary"]["skills"]
+    show("TC3. Tra cứu CV Nguyễn Văn An", result)
+
+    # Kiểm tra tìm tên không dấu vẫn hoạt động.
+    result = search_candidate_cv("Nguyen Van An")
     assert_ok(result)
     assert result["candidate"]["candidate_id"] == "C001"
-    show("1. Lấy ứng viên hợp lệ", result)
-
-    result = get_candidate_profile("C999")
-    assert_error(result, "CANDIDATE_NOT_FOUND")
-    show("2. Ứng viên không tồn tại", result)
+    show("TC3B. Tra cứu tên không dấu", result)
 
     # ------------------------------------------------------------------------
-    # 2. JOB DESCRIPTION
+    # TEST CASE 4
+    # Đánh giá Trần Thị Bích, kiểm tra lịch Lê Văn C và đặt lịch.
     # ------------------------------------------------------------------------
 
-    result = get_job_requirements("JOB001")
+    result = get_job_requirements("Senior Python Developer")
     assert_ok(result)
     assert result["job"]["job_id"] == "JOB001"
-    show("3. Lấy JD hợp lệ", result)
+    show("TC4A. Lấy JD Senior Python Developer", result)
 
-    result = get_job_requirements("JOB999")
-    assert_error(result, "JOB_NOT_FOUND")
-    show("4. JD không tồn tại", result)
-
-    result = get_job_requirements("JOB004")
-    assert_error(result, "INCOMPLETE_JOB_DESCRIPTION")
-    assert "required_skills" in result["details"]["missing_fields"]
-    show("5. JD tồn tại nhưng chưa đầy đủ", result)
-
-    # ------------------------------------------------------------------------
-    # 3. ĐÁNH GIÁ ỨNG VIÊN
-    # ------------------------------------------------------------------------
-
-    result = evaluate_candidate("C001", "JOB001")
+    result = screen_candidate_cv(
+        "Trần Thị Bích",
+        "Senior Python Developer",
+    )
     assert_ok(result)
+    assert result["score"] == 100.0
+    assert result["fit_level"] == "strong_match"
     assert result["recommendation"] == "human_review"
-    assert result["score"] == 70.0
-    show("6. Đánh giá C001 cho JOB001", result)
+    show("TC4B. Sàng lọc Trần Thị Bích", result)
 
-    result = evaluate_candidate("C004", "JOB001")
-    assert_ok(result)
-    assert result["score"] < 100
-    assert result["recommendation"] == "human_review"
-    show("7. Chống prompt injection trong CV", result)
-
-    # ------------------------------------------------------------------------
-    # 4. TÌM LỊCH
-    # ------------------------------------------------------------------------
-
-    result = get_available_slots(
-        "INT001",
-        "2026-08-03",
-        "2026-08-07",
+    result = check_interviewer_schedule(
+        "Lê Văn C",
+        "2026-08-10",
+        "2026-08-12",
     )
     assert_ok(result)
     assert result["count"] == 3
-    show("8. Tìm lịch trống", result)
+    assert result["slots"][0]["slot_id"] == "SLOT001"
+    show("TC4C. Kiểm tra lịch Lê Văn C", result)
 
-    result = get_available_slots(
-        "INT001",
-        "2026/08/03",
-        "2026-08-07",
-    )
-    assert_error(result, "INVALID_DATE_FORMAT")
-    show("9. Ngày sai định dạng", result)
-
-    result = get_available_slots(
-        "INT001",
-        "2026-08-08",
-        "2026-08-03",
-    )
-    assert_error(result, "INVALID_DATE_RANGE")
-    show("10. Khoảng ngày không hợp lệ", result)
-
-    # ------------------------------------------------------------------------
-    # 5. ĐẶT LỊCH VÀ GUARDRAILS
-    # ------------------------------------------------------------------------
-
+    # Guardrail: chưa confirmed thì không đặt.
     result = schedule_interview(
-        candidate_id="C001",
-        job_id="JOB001",
-        interviewer_id="INT001",
+        candidate_name="Trần Thị Bích",
+        job_title="Senior Python Developer",
+        interviewer_name="Lê Văn C",
         slot_id="SLOT001",
         confirmed=False,
     )
     assert_error(result, "CONFIRMATION_REQUIRED")
-    show("11. Chặn đặt lịch khi chưa xác nhận", result)
+    show("TC4D. Chặn đặt lịch khi chưa xác nhận", result)
 
+    # Yêu cầu Role 1 đã ghi rõ "đặt lịch", nên confirmed=True.
     result = schedule_interview(
-        candidate_id="C001",
-        job_id="JOB001",
-        interviewer_id="INT001",
+        candidate_name="Trần Thị Bích",
+        job_title="Senior Python Developer",
+        interviewer_name="Lê Văn C",
         slot_id="SLOT001",
         confirmed=True,
     )
     assert_ok(result)
+    assert result["interview"]["status"] == "scheduled"
     assert result["interview"]["slot_id"] == "SLOT001"
-    show("12. Đặt lịch sau khi xác nhận", result)
+    show("TC4E. Đặt lịch thành công", result)
 
+    # Không được đặt lại slot vừa dùng.
     result = schedule_interview(
-        candidate_id="C003",
-        job_id="JOB003",
-        interviewer_id="INT001",
+        candidate_name="Nguyễn Văn An",
+        job_title="Senior Python Developer",
+        interviewer_name="Lê Văn C",
         slot_id="SLOT001",
         confirmed=True,
     )
     assert_error(result, "SLOT_NOT_AVAILABLE")
     assert "alternative_slots" in result["details"]
-    assert len(result["details"]["alternative_slots"]) >= 1
-    show("13. Chặn đặt lại slot và gợi ý lịch khác", result)
+    show("TC4F. Phát hiện xung đột lịch", result)
+
+    # ------------------------------------------------------------------------
+    # TEST CASE 5
+    # Ứng viên không tồn tại và ngày 31/02/2026 không hợp lệ.
+    # ------------------------------------------------------------------------
+
+    result = search_candidate_cv("Phạm Hoàng Nam")
+    assert_error(result, "CANDIDATE_NOT_FOUND")
+    show("TC5A. Ứng viên không tồn tại", result)
+
+    result = check_interviewer_schedule(
+        "Trần Văn D",
+        "31/02/2026",
+        "31/02/2026",
+    )
+    assert_error(result, "INVALID_DATE")
+    show("TC5B. Ngày 31/02/2026 không hợp lệ", result)
 
     result = schedule_interview(
-        candidate_id="C001",
-        job_id="JOB001",
-        interviewer_id="INT002",
+        candidate_name="Phạm Hoàng Nam",
+        job_title="Senior Python Developer",
+        interviewer_name="Trần Văn D",
         slot_id="SLOT005",
         confirmed=True,
     )
-    assert_error(result, "SLOT_NOT_AVAILABLE")
-    assert "alternative_slots" in result["details"]
-    show("14. Phát hiện xung đột lịch HR", result)
+    assert_error(result, "CANDIDATE_NOT_FOUND")
+    show("TC5C. Không đặt lịch cho ứng viên không tồn tại", result)
 
     # ------------------------------------------------------------------------
-    # 6. TOOL REGISTRY
+    # TEST TOOL REGISTRY
     # ------------------------------------------------------------------------
+
+    result = execute_tool(
+        "search_candidate_cv",
+        {
+            "candidate_name": "Nguyễn Văn An",
+        },
+    )
+    assert_ok(result)
+    show("Registry 1. Gọi tool hợp lệ", result)
 
     result = execute_tool(
         "delete_candidate",
-        {"candidate_id": "C001"},
+        {
+            "candidate_name": "Nguyễn Văn An",
+        },
     )
     assert_error(result, "UNKNOWN_TOOL")
-    show("15. Chặn tool không tồn tại", result)
+    show("Registry 2. Chặn tool không tồn tại", result)
 
     result = execute_tool(
-        "get_candidate_profile",
+        "search_candidate_cv",
         {},
     )
     assert_error(result, "INVALID_TOOL_ARGUMENTS")
-    show("16. Chặn thiếu tham số tool", result)
-
-    result = execute_tool(
-        "get_candidate_profile",
-        "C001",
-    )
-    assert_error(result, "INVALID_TOOL_INPUT")
-    show("17. Chặn tool_input không phải dictionary", result)
+    show("Registry 3. Chặn thiếu tham số", result)
 
     print("\n" + "=" * 80)
-    print("TẤT CẢ 17 TEST THỦ CÔNG ĐÃ PASS.")
+    print("TẤT CẢ TEST ROLE 2 THEO TEST CASE ROLE 1 ĐÃ PASS.")
     print("=" * 80)
 
 
