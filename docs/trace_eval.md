@@ -7,12 +7,11 @@
 
 | Tiêu chí | Điểm (1-5) | Lý do đánh giá |
 | :--- | :---: | :--- |
-| 🧠 **Multi-step Reasoning** | `4/5` | Cần suy luận từ tra cứu thời tiết đến chọn trang phục. |
-| 🛠️ **Tool Interaction** | `5/5` | Cần tra cứu dữ liệu thời gian thực qua API thời tiết/chuyến bay. |
-| 🔀 **Dynamic Decision** | `4/5` | Kết quả bước trước quyết định hành động bước sau. |
-| ⏳ **Long Horizon** | `3/5` | Quy trình gồm 2-3 bước xử lý ngắn. |
-| **TỔNG ĐIỂM FIT** | **16/20** | **KẾT LUẬN: BÀI TOÁN RẤT NÊN DÙNG REACT AGENT!** |
-
+| 🧠 **Multi-step Reasoning** | `5/5` | Phải đọc yêu cầu công việc, lấy hồ sơ, đối chiếu tiêu chí rồi quyết định bước tiếp theo. |
+| 🛠️ **Tool Interaction** | `5/5` | Cần tool lấy CV, JD, lịch phỏng vấn và tạo lịch hẹn. |
+| 🔀 **Dynamic Decision** | `5/5` | Kết quả sàng lọc quyets định có kiểm tra đặt lịch hay không. |
+| ⏳ **Long Horizon** | `4/5` | Quy trình gồm nhiều bước, có thể cần xác nhận từ ứng viên hoặc nhà tuyển dụng. |
+| **TỔNG ĐIỂM FIT** | **19/20** | **KẾT LUẬN: BÀI TOÁN RẤT NÊN DÙNG REACT AGENT!** |
 ---
 
 ## 🔍 2. SO SÁNH PHẢN HỒI (TEST CASE #3)
